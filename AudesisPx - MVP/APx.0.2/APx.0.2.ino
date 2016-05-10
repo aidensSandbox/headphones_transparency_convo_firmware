@@ -25,23 +25,29 @@
 #include <SD.h>
 #include <SerialFlash.h>
 
-
 // GUItool: begin automatically generated code
-AudioInputI2SQuad        i2s_quad1;      //xy=377,202
-AudioMixer4              mixer1;         //xy=629,160
-AudioMixer4              mixer2;         //xy=631,254
-AudioOutputI2SQuad       i2s_quad2;      //xy=822,214
+AudioInputI2SQuad        i2s_quad1;      //xy=269,392
+AudioFilterBiquad        biquad1;        //xy=450,309
+AudioFilterBiquad        biquad2;        //xy=467,491
+AudioMixer4              mixer1;         //xy=718,351
+AudioMixer4              mixer2;         //xy=720,445
+AudioOutputI2SQuad       i2s_quad2;      //xy=911,405
 AudioConnection          patchCord1(i2s_quad1, 0, mixer1, 0);
-AudioConnection          patchCord2(i2s_quad1, 1, mixer2, 0);
-AudioConnection          patchCord3(i2s_quad1, 2, mixer1, 1);
-AudioConnection          patchCord4(i2s_quad1, 3, mixer2, 1);
-AudioConnection          patchCord5(mixer1, 0, i2s_quad2, 0);
-AudioConnection          patchCord6(mixer2, 0, i2s_quad2, 1);
-//AudioConnection          patchCord7(mixer1, 0, i2s_quad2, 2); // output to lower headphone jack
-//AudioConnection          patchCord8(mixer2, 0, i2s_quad2, 3); // output to lower headphone jack
-AudioControlSGTL5000     sgtl5000_1;     //xy=162,36
-AudioControlSGTL5000     sgtl5000_2;     //xy=492,44
+AudioConnection          patchCord2(i2s_quad1, 0, biquad1, 0);
+AudioConnection          patchCord3(i2s_quad1, 1, mixer2, 0);
+AudioConnection          patchCord4(i2s_quad1, 1, biquad2, 0);
+AudioConnection          patchCord5(i2s_quad1, 2, mixer1, 1);
+AudioConnection          patchCord6(i2s_quad1, 3, mixer2, 1);
+AudioConnection          patchCord7(biquad1, 0, mixer1, 2);
+AudioConnection          patchCord8(biquad2, 0, mixer2, 2);
+AudioConnection          patchCord9(mixer1, 0, i2s_quad2, 0);
+AudioConnection          patchCord10(mixer1, 0, i2s_quad2, 2);
+AudioConnection          patchCord11(mixer2, 0, i2s_quad2, 1);
+AudioConnection          patchCord12(mixer2, 0, i2s_quad2, 3);
+AudioControlSGTL5000     sgtl5000_1;     //xy=251,227
+AudioControlSGTL5000     sgtl5000_2;     //xy=581,235
 // GUItool: end automatically generated code
+
 
 const int myInput = AUDIO_INPUT_LINEIN;
 const int buttonPin = 26;
@@ -56,10 +62,10 @@ float maxmusicvol=0.75;
 elapsedMillis currentTime; //current clock time elapsed since execution (reboot)
 //float currentTime = millis();
 
-void rampUp(AudioControlSGTL5000 & audioShield) {
+void rampUp(AudioControlSGTL5000 & audioShield, float maxrampvol) {
 
   //define variables
-  float rampTime = 3000; //volume initial ramp time
+  float rampTime = 2000; //volume initial ramp time
   float delayTime = 50; //ms
   int x = 0;
   unsigned int startTime;
@@ -71,11 +77,38 @@ void rampUp(AudioControlSGTL5000 & audioShield) {
   while (currentTime < startTime + rampTime) {
     float elapsedTime = currentTime - startTime;
     float vol = elapsedTime / rampTime;
-    audioShield.volume(vol * maxmusicvol);
+    audioShield.volume(vol * maxrampvol);
     Serial.println(vol, 4);
     delay(delayTime);
   }
-  audioShield.volume(maxmusicvol); //just in case I skip an iteration
+  audioShield.volume(maxrampvol); //just in case I skip an iteration
+}
+
+void setupGain(float rw, float mc, float bq) {
+ //Inputs (Master Raw gain, Master Mic gain, bi-quad gain, unused mixer channel [set to zero])
+  int freq1=500;//300, 100
+  int freq2=1500;
+  int freq3=5000;//3400
+
+  //turn off unused mixer channel
+  mixer1.gain(3,0);
+  mixer2.gain(3,0);
+  
+  //Filter parameter setup
+  biquad1.setNotch (0,freq2,0.05); //works great and does the trick w one filter 
+  biquad2.setNotch (0,freq2,0.05); //0.02
+  //biquad2.setLowpass (0,300,0.2); 
+  //biquad1.setLowpass (0,300,0.2); 
+  
+  //Ear 1
+  mixer1.gain(0,rw); //Raw music gain
+  mixer1.gain(1,mc); //Mic gain
+  mixer1.gain(2,bq); //bi-quad filtered signal gain
+  
+  //Ear 2
+  mixer2.gain(0,rw); //Raw music gain
+  mixer2.gain(1,mc); //Mic gain
+  mixer2.gain(2,bq); //bi-quad filtered signal gain
 }
 
 void setup() {
@@ -87,7 +120,7 @@ void setup() {
 
   // Audio connections require memory to work.  For more
   // detailed information, see the MemoryAndCpuUsage example
-  AudioMemory(50);
+  AudioMemory(150);
 
   // Enable the first audio shield (Music), select input, and enable output
   sgtl5000_1.setAddress(LOW);
@@ -114,17 +147,13 @@ void setup() {
   sgtl5000_1.eqBands(0,-0.4,-0.5,-0.4,-0.2); //115Hz, 330Hz, 990Hz, 3kHz, 8.8kHz
   //sgtl5000_1.eqBands(0,0,0,0,0); //115Hz, 330Hz, 990Hz, 3kHz, 8.8kHz
   
-  //music mix
-  mixer1.gain(0, 0.75);
-  mixer2.gain(0, 0.75);
-  //mic mix
-  mixer1.gain(1, 0);
-  mixer2.gain(1, 0);
-
+  //setup gain
+setupGain(maxmusicvol,0,0);
 
   Serial.println("Start Ramping Up");
   //sgtl5000_1.dacVolumeRampDisable();
-  rampUp(sgtl5000_1);
+  rampUp(sgtl5000_1, maxmusicvol);
+  rampUp(sgtl5000_2, maxmusicvol);
   Serial.println("done ramping");
 }
 
@@ -178,15 +207,11 @@ void loop() {
     //if (news==1) {
     Serial.println("Deep focus activated");
     news = 0;
-    //}
-    //music mix
-    mixer1.gain(0, 0.75);
-    mixer2.gain(0, 0.75);
-    //mic mix
-    mixer1.gain(1, 0); //might shut this off to save battery (using disable() or mutelinein())
-    mixer2.gain(1, 0);
+    
+    //Adjust gain mix
+    setupGain(maxmusicvol,0,0);
   }
-
+/*
   if (mode == 1 && news == 1) {
     //conversation; mode1
     //notes: get mics to percieve conversation range with EQ, apply inv.vocal boost on music
@@ -197,26 +222,36 @@ void loop() {
   
       //EQ for Mic
       sgtl5000_2.eqSelect(3);
-      sgtl5000_2.eqBands(-0.2,0,0,0,-0.2);
+      sgtl5000_2.eqBands(0,0,0,0,0);
      
-      Serial.println("Conversation activated");
+      Serial.println("Conversation activated - normal");
       news = 0;
-/*
-    //music mix
-    mixer1.gain(0, 0.4);
-    mixer2.gain(0, 0.4);
-    //mic mix
-    mixer1.gain(1, 0); //might shut this off to save battery (using disable() or mutelinein())
-    mixer2.gain(1, 0);
+
+     //set gain mix
+     setupGain(0.05,0.065,0);
+      
 
   }
- */    
-      //music mix
-      mixer1.gain(0,0.01);
-      mixer2.gain(0,0.01);
-      //mic mix
-      mixer1.gain(1,0.065);
-      mixer2.gain(1,0.065);
+*/
+
+  
+  if (mode == 1 && news == 1) {
+    //conversation; mode1
+    //notes: get mics to percieve conversation range with EQ, apply inv.vocal boost on music
+
+      //EQ for Music
+      sgtl5000_1.eqSelect(3);
+      sgtl5000_1.eqBands(0,-0.4,-0.5,-0.4,-0.2); //115Hz, 330Hz, 990Hz, 3kHz, 8.8kHz
+  
+      //EQ for Mic
+      sgtl5000_2.eqSelect(3);
+      sgtl5000_2.eqBands(-0.8,0.5,0,-0.2,-0.4);
+     
+      Serial.println("Conversation activated - with bi-quad");
+      news = 0;
+
+     //set gain mix
+     setupGain(0,0.09,0.25);//0,0.75,0.3
 
   }
 
@@ -232,17 +267,13 @@ void loop() {
 
     //EQ for Mic
     sgtl5000_2.eqSelect(3);
-    sgtl5000_2.eqBands(-0.2,0,0,0,-0.2);
+    sgtl5000_2.eqBands(0,0.5,0,-0.2,-0.2);
 
     Serial.println("Awareness mode activated");
     news = 0;
 
-    //music mix
-    mixer1.gain(0, 0.1);
-    mixer2.gain(0, 0.1);
-    //mic mix
-    mixer1.gain(1, 0.060);
-    mixer2.gain(1, 0.060);
+    //set gain mix
+    setupGain(0.4,0.08,0);//0,.075
   }
 
   //Serial.println("working");
